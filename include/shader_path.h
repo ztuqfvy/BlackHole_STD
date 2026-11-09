@@ -64,7 +64,10 @@ inline std::string find_shader_dir() {
     for (int i = 0; i < 6; ++i) {
         std::string cand = dir + "/src/shaders";
         if (shader_dir_exists(cand)) return cand;
-        auto pos = dir.find_last_of('/');
+        // Windows paths come back from GetModuleFileNameA with backslashes;
+        // splitting on '/' alone stops the walk on the first iteration and
+        // lands on the CWD fallback, which is how the shaders went missing.
+        auto pos = dir.find_last_of("/\\");
         if (pos == std::string::npos || pos == 0) break;
         dir = dir.substr(0, pos);
     }
