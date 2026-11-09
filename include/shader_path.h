@@ -11,6 +11,8 @@
 // A SHADERS_DIR define (if the CMake build still provides one) wins.
 
 #include <string>
+#include <cstdio>
+#include <cstdlib>
 #include <sys/stat.h>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -61,9 +63,15 @@ inline std::string find_shader_dir() {
     // target/<triple>/<fingerprint>/exe  ->  3 levels up reaches the project
     // root; allow a few more for deeper layouts.
     std::string dir = shader_executable_dir();
+    const bool debug = std::getenv("BH_SHADER_DEBUG") != nullptr;
+    if (debug) std::fprintf(stderr, "SHADER: exe_dir=[%s]\n", dir.c_str());
     for (int i = 0; i < 6; ++i) {
         std::string cand = dir + "/src/shaders";
-        if (shader_dir_exists(cand)) return cand;
+        if (shader_dir_exists(cand)) {
+            if (debug) std::fprintf(stderr, "SHADER: found [%s]\n", cand.c_str());
+            return cand;
+        }
+        if (debug) std::fprintf(stderr, "SHADER: miss  [%s]\n", cand.c_str());
         // Windows paths come back from GetModuleFileNameA with backslashes;
         // splitting on '/' alone stops the walk on the first iteration and
         // lands on the CWD fallback, which is how the shaders went missing.
@@ -71,6 +79,7 @@ inline std::string find_shader_dir() {
         if (pos == std::string::npos || pos == 0) break;
         dir = dir.substr(0, pos);
     }
+    if (debug) std::fprintf(stderr, "SHADER: fallback [src/shaders]\n");
     // Fall back to the working directory (e.g. `mcpp run` from project root).
     if (shader_dir_exists("src/shaders")) return "src/shaders";
     return "src/shaders"; // let the shader loader report the failure
