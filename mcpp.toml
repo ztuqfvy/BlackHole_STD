@@ -50,6 +50,13 @@ include_dirs = [
 # so this define turns it off without touching the submodule.
 defines = ["EIGEN_HAS_STD_RESULT_OF=0"]
 
+# Windows: <windows.h> defines min/max as macros, so `std::min(a, b)` expands to
+# `std::(((a)<(b))?(a):(b))` and every such call site dies with "expected
+# unqualified-id". NOMINMAX keeps the std:: templates; WIN32_LEAN_AND_MEAN drops
+# winsock1/ole from windows.h so the two sets of declarations do not collide.
+[target.'cfg(os = "windows")'.build]
+defines = ["NOMINMAX", "WIN32_LEAN_AND_MEAN"]
+
 # Objective-C++ (Metal renderer + imgui Metal backend) compiles under ARC;
 # imgui_impl_metal.mm in particular is written assuming it.
 [[build.flags]]
