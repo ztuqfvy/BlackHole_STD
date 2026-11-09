@@ -1,0 +1,142 @@
+# mcpp build manifest — macOS port of the BlackHole_Observer project.
+#
+# Differences from the original CMake build:
+#   - glfw / glad / imgui come from the mcpp index (compat:*) instead of the
+#     git submodules under external/ (glad, glfw, imgui submodules are not
+#     checked out; Eigen is, and stays vendored below).
+#   - OpenGLGeodesic.cpp is excluded: it uses GL 4.3 compute/SSBO APIs that
+#     macOS (GL 4.1 cap) cannot load, and its only consumer is
+#     BH_REALTIME_GL (src/Swz_Realtime_GL.cpp), which needs compute shaders
+#     and therefore cannot run on macOS OpenGL either.
+#   - The volume pass was ported from a GL 4.3 compute shader to a GL 3.3
+#     fragment-shader pass (src/shaders/volume_render.{vert,frag}), so the
+#     main renderer SWZ_BH_REALTIME runs on macOS GL 4.1 core.
+#   - The test programs that need Python/matplotlib or GSL (geodesic_test,
+#     geodesic_auto_test, volume_render_test) or windows.h (window_test,
+#     bloom_test) are not declared as targets here.
+
+[package]
+name        = "blackhole-observer"
+version     = "1.0.0"
+description = "Schwarzschild black hole geodesic ray-marching renderer"
+standard    = "c++20"
+
+[dependencies.compat]
+glfw = "3.4.0.1"
+glad = "0.0.0-651a425"
+imgui = "1.92.8"
+# volume-render-test 的特殊函数为内置自实现(include/sf_hydrogen.h):
+# compat:gsl 2.8 的源码构建在新 clang 下失败(C89 隐式声明)。
+
+[build]
+# The renderer ray-marches ~2M geodesics on the CPU before the first frame;
+# a -O0 dev build is unusable, so plain `mcpp build` means release.
+default-profile = "release"
+sources = [
+    "include/*.cpp",
+    # Dear ImGui GLFW + OpenGL3 backends, vendored to match compat:imgui.
+    # (compat:imgui compiles only the core; the backends are ours to build.)
+    "src/imgui_backends/*.cpp",
+    # GL 4.3-only (compute/SSBO); see the note at the top of this file.
+    "!include/OpenGLGeodesic.cpp",
+]
+include_dirs = [
+    "include",
+    "python",        # gauge_march.cpp includes the sympy-generated headers
+    "external/Eigen" # vendored Eigen (provides the `Eigen` convenience header)
+]
+# The vendored Eigen 3.3.8 predates C++20: its feature probe thinks lambdas
+# imply std::result_of, which C++20 removed. The probe has an #ifndef guard,
+# so this define turns it off without touching the submodule.
+defines = ["EIGEN_HAS_STD_RESULT_OF=0"]
+
+# Objective-C++ (Metal renderer + imgui Metal backend) compiles under ARC;
+# imgui_impl_metal.mm in particular is written assuming it.
+[[build.flags]]
+glob = "**/*.mm"
+cxxflags = ["-fobjc-arc"]
+
+[target.'cfg(macos)'.build]
+# Our own GL calls (everything except glfw's own link line, which the
+# compat:glfw package provides with Cocoa/IOKit/CoreFoundation).
+# The last three are for the Metal renderer (M-series / Apple GPUs):
+# Metal: MTLCreateSystemDefaultDevice etc., AppKit: NSWindow/NSView via
+# glfwGetCocoaWindow, QuartzCore: CAMetalLayer.
+ldflags = ["-framework OpenGL", "-framework Metal", "-framework AppKit", "-framework QuartzCore"]
+# Metal rendering path (Apple platforms only).
+sources = [
+    "include/MetalRenderer.mm",
+    "include/MetalVolumeCompute.mm",
+    "src/imgui_backends/*.mm",
+]
+
+# The main program: CPU geodesic ray march + GL volume/bloom render + ImGui UI.
+[targets.swz-bh-realtime]
+kind = "bin"
+main = "src/Swz_Realtime.cpp"
+
+# Metal rendering path: same CPU physics, Metal display/bloom + compute-shader
+# volume pass (restores the original SSBO/rgba32f design; see
+# include/MetalRenderer.h and include/MetalVolumeCompute.h).
+# Metal only exists on Apple platforms: the top-level row carries the .mm main,
+# and non-macOS targets override main to a stub (a selector row may not
+# *define* a bin target: "a row chooses between the library forms only").
+[targets.swz-bh-realtime-metal]
+kind = "bin"
+main = "src/Swz_Realtime_Metal.mm"
+
+[target.'cfg(os = "windows")'.targets.swz-bh-realtime-metal]
+main = "src/test/target_stub.cpp"
+
+[target.'cfg(os = "openkal")'.targets.swz-bh-realtime-metal]
+main = "src/test/target_stub.cpp"
+
+# 原离线渲染程序(SWARZSCHILD_BH):CPU 步进 + 吸积盘 + CPU 泛光
+[targets.schwarzschild]
+kind = "bin"
+main = "src/Schwarzschild.cpp"
+
+# ---- 测试(对应原 CMake 的 *_TEST) ----
+
+[targets.io-test]
+kind = "bin"
+main = "src/test/io_test.cpp"
+
+[targets.window-test]
+kind = "bin"
+main = "src/test/window_test.cpp"
+
+[targets.bloom-test]
+kind = "bin"
+main = "src/test/bloom_test.cpp"
+
+# 测地线测试:绘图由 matplotlib(嵌入 Python)改为内置 SVG 输出
+[targets.geodesic-test]
+kind = "bin"
+main = "src/test/geodesic_test.cpp"
+
+[targets.geodesic-auto-test]
+kind = "bin"
+main = "src/test/geodesic_auto_test.cpp"
+
+# 体渲染测试(氢原子电子轨道云),GSL 来自 compat:gsl
+[targets.volume-render-test]
+kind = "bin"
+main = "src/test/volume_render_test.cpp"
+
+# Quick smoke test of the glfw + glad + imgui stack.
+[targets.imgui-test]
+kind = "bin"
+main = "src/test/imgui_test.cpp"
+
+# openkal 式目标(x86_64-windows 等)的 system side 来自依赖图,不由宿主 payload
+# 提供 —— 社区(sunrisep eak)给出的配方。**必须挂在 feature-deps 下**:
+# 若写进无条件 [dependencies],它把 macOS 目标的 c++-abi 也换成依赖图的
+# libc++,级联拉进 openkal-musl,Apple SDK 头文件(TargetConditionals.h 等)全部
+# 消失,macOS 构建直接报废。用法:
+#   mcpp build --target x86_64-windows --features openkal-cross
+[features]
+openkal-cross = {}
+
+[feature-deps.openkal-cross]
+openkal-llvm-runtime = "0.19.2"

@@ -1,6 +1,7 @@
 #include "bloom.h"
 #include <iostream>
 #include <algorithm>
+#include <cmath>
 Bloom::Bloom(){
     pixels_ = nullptr;
 }

@@ -5,3 +5,9 @@ external/glm
 external/glfw
 external/glad
 .tex
+target/
+mcpp.lock
+.mcpp/
+imgui.ini
+.idea/
+.DS_Store

@@ -1,5 +1,6 @@
 #include "OpenGLRenderer.h"
 #include "OpenGLShaderInit.h"
+#include "window_fit.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -58,11 +59,18 @@ void OpenGLRenderer::initWindow(const std::string& title) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+    // 渲染纹理尺寸固定为 (width, height);窗口按屏幕工作区收缩以避免
+    // 越界(macOS 内置屏逻辑高度 ~1112,放不下 1200),并锁定尺寸——
+    // 渲染分辨率是固定的,窗口拉伸反而造成显示与坐标不一致。
+    int win_w, win_h;
+    fit_window_size(width, height, win_w, win_h);
+
+    window = glfwCreateWindow(win_w, win_h, title.c_str(), nullptr, nullptr);
     if (!window) {
         glfwTerminate();
         throw std::runtime_error("Failed to create GLFW window");
     }
+    glfwSetWindowSizeLimits(window, win_w, win_h, win_w, win_h);
 
     glfwMakeContextCurrent(window);
 
@@ -72,7 +80,17 @@ void OpenGLRenderer::initWindow(const std::string& title) {
         throw std::runtime_error("Failed to initialize GLAD");
     }
 
-    glViewport(0, 0, width, height);
+    // Retina:glfw 默认 wantsBestResolutionOpenGLSurface=YES,GL 表面为窗口
+    // 点尺寸×2(与 glfwGetFramebufferSize 报告一致)。屏幕 pass 的视口一律
+    // 用 framebuffer 尺寸,渲染分辨率纹理由全屏四边形放大铺满;ImGui 的
+    // DisplayFramebufferScale 与表面比例天然一致。
+    int fb_w, fb_h;
+    glfwGetWindowSize(window, &win_w, &win_h);
+    glfwGetFramebufferSize(window, &fb_w, &fb_h);
+    glViewport(0, 0, fb_w, fb_h);
+    std::cout << "GL window " << win_w << "x" << win_h << " framebuffer " << fb_w
+              << "x" << fb_h << " (render " << width << "x" << height << ")"
+              << std::endl;
 }
 
 void OpenGLRenderer::initShaders() {
@@ -160,11 +178,20 @@ void OpenGLRenderer::render(bool if_swap) {
 
     GLuint texToUse = extTexture ? extTexture : texture;
 
+    // 离屏 pass(亮部提取/模糊)渲染到 width×height 的纹理;
+    // 屏幕 pass(合成/显示)渲染到帧缓冲(Retina 下为窗口点尺寸×2),
+    // 把渲染分辨率纹理缩放铺满。
+    int fb_w, fb_h;
+    glfwGetFramebufferSize(window, &fb_w, &fb_h);
+
     if (bloomEnabled) {
+        glViewport(0, 0, width, height);
         extractBrightAreas(texToUse);
         gaussianBlur(brightTexture, bloom_N);
+        glViewport(0, 0, fb_w, fb_h);
         combineFinalImage(texToUse, pingpongTex[1]);
     } else {
+        glViewport(0, 0, fb_w, fb_h);
         glUseProgram(shaderProgram);
         glBindVertexArray(VAO);
         glActiveTexture(GL_TEXTURE0);

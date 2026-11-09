@@ -1,5 +1,6 @@
-
-#include "matplotlibcpp.h"
+// 任意时空(符号计算联络)测地线测试。
+// 原版通过嵌入 Python 的 matplotlib 绘图;mcpp 构建改用 SVGPlot 输出。
+#include "svg_plot.h"
 #include "geodesic.h"
 #include "gauge_march.h"
 #include <vector>
@@ -7,13 +8,13 @@
 #include <memory>
 #include <iostream>
 
-namespace plt = matplotlibcpp;
 typedef std::shared_ptr<std::vector<double>> sv;
 int main()
 {
 
     std::unique_ptr<RayMarch> gauge_march = std::make_unique<Gauge_March>();
     gauge_march->M_ = 1;
+    SVGPlot plt;
     for (int i = 0; i < 5; ++i){
         //for (int j = 0; j < 2; ++j){
         Eigen::Vector3d x0(2.9 + i * 0.2,0,0), v0(-1.0,0.0000,1);
@@ -29,18 +30,18 @@ int main()
             y.push_back((*light)[i][2]);
             //std::cout << x.back() << ' ' << y.back() << std::endl;
         }
-        plt::plot(x,y);
+        plt.plot(x,y);
         //}
     }
     /*
     for (int i = 0; i < 5; ++i){
         BH.compute(0, 3.1 + i * 0.2, 0, 0.01);
-        plt::plot(*(BH.to_x(10)),*(BH.to_y(10)));
+        plt.plot(*(BH.to_x(10)), *(BH.to_y(10)));
     }*/
-    PyRun_SimpleString("import matplotlib.pyplot as plt");
-    PyRun_SimpleString("plt.gca().set_aspect('equal', adjustable='box')");
+    if (plt.save("geodesic_auto_test.svg"))
+        std::cout << "已输出 geodesic_auto_test.svg(浏览器打开查看,等比坐标)" << std::endl;
+    else
+        std::cerr << "SVG 输出失败" << std::endl;
 
-    plt::show();
-    
     return 0;
 }

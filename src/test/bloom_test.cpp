@@ -1,8 +1,9 @@
 #include "OpenGLRenderer.h"
 #include "bloom.h"
-#include <windows.h>
 #include <vector>
 #include <chrono>
+#include <cstdio>
+#include <iostream>
 
 int main() {
     
@@ -52,6 +53,8 @@ int main() {
     printf("bloom_gauss_2 spent: %.3f ms\n", elapsed.count());
     renderer.updatePixels(pixels);
     renderer.render();
-    system("pause");
+    // 原 Windows 版为 system("pause");跨平台改为等待回车
+    std::cout << "按回车退出..." << std::flush;
+    std::cin.get();
     return 0;
 }

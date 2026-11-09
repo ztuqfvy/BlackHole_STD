@@ -26,7 +26,9 @@ int main() {
 
     float f = 0.0f;
     int counter = 0;
-    bool show_demo_window = true;
+    // ShowDemoWindow() lives in imgui_demo.cpp, which compat:imgui does not
+    // compile (core only), so this test no longer opens the demo window.
+    bool show_demo_window = false;
 
     io.FontGlobalScale = 2.0f;
     // 主循环
@@ -38,9 +40,7 @@ int main() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // 示例窗口
-        if (show_demo_window)
-            ImGui::ShowDemoWindow(&show_demo_window);
+        // 示例窗口（demo window 未链接，见上文说明）
 
         // 自定义窗口
         ImGui::Begin("Hello, ImGui!");
@@ -49,7 +49,6 @@ int main() {
         if (ImGui::Button("Count")) counter++;
         ImGui::SameLine();
         ImGui::Text("Count: %d", counter);
-        ImGui::Checkbox("Show Demo Window", &show_demo_window);
         ImGui::End();
 
         // 渲染

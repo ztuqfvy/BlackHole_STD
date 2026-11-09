@@ -1,5 +1,6 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include "shader_path.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -134,7 +135,9 @@ int main() {
     glBindVertexArray(0);
 
     // 加载着色器
-    unsigned int shaderProgram = LoadShader(SHADERS_DIR "/vertex_shader.glsl", SHADERS_DIR "/fragment_shader.glsl");
+    const std::string shader_dir = find_shader_dir();
+    unsigned int shaderProgram = LoadShader((shader_dir + "/vertex_shader.glsl").c_str(),
+                                            (shader_dir + "/fragment_shader.glsl").c_str());
     // 渲染循环
     while (!glfwWindowShouldClose(window)) {
         // 处理输入

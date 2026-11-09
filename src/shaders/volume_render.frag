@@ -1,0 +1,226 @@
+#version 330 core
+// Volume rendering pass — GL 3.3 port of volume_compute.comp (GL 4.3).
+//
+// macOS caps OpenGL at 4.1 core, which has neither compute shaders nor
+// SSBOs nor image load/store, so the per-pixel integration runs as a
+// fragment shader instead:
+//   - the geodesic paths arrive as a sampler2DArray (was: SSBO), layer i
+//     holding sample i of every pixel (a single 2D texture of
+//     width*maxPaths x height would exceed the 16384 macOS texture limit);
+//   - the result is written to the FBO's RGBA16F color attachment (was:
+//     imageStore into an rgba32f image, which macOS cannot render to).
+// The integration math itself is unchanged.
+
+out vec4 FragColor;
+
+uniform sampler2DArray paths;   // layer i = i-th path sample, texel (x, y) = pixel
+uniform int pathStride;         // samples per pixel (== layer count)
+uniform float temperature;
+uniform int if_dopplerI;
+uniform int if_dopplerT;
+uniform float L;
+uniform float time;
+
+vec3 fade(vec3 t) {
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+float lerp(float a, float b, float t) {
+    return a + t * (b - a);
+}
+
+float grad(int hash, vec3 p) {
+    int h = hash & 15;
+    float u = h < 8 ? p.x : p.y;
+    float v = h < 4 ? p.y : (h == 12 || h == 14 ? p.x : p.z);
+    return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+}
+
+// 伪随机排列
+int permute(int x) {
+    return int(fract(sin(float(x)) * 43758.5453) * 256.0);
+}
+
+float perlin(vec3 p) {
+
+    vec3 Pi = floor(p);
+    vec3 Pf = p - Pi;
+    Pi = mod(Pi, 256.0);
+
+    int xi = int(Pi.x);
+    int yi = int(Pi.y);
+    int zi = int(Pi.z);
+
+    float xf = Pf.x;
+    float yf = Pf.y;
+    float zf = Pf.z;
+
+    vec3 f = fade(Pf);
+
+    // 8 corners of cube
+    int aaa = permute(permute(permute(xi) + yi) + zi);
+    int aba = permute(permute(permute(xi) + yi + 1) + zi);
+    int aab = permute(permute(permute(xi) + yi) + zi + 1);
+    int abb = permute(permute(permute(xi) + yi + 1) + zi + 1);
+    int baa = permute(permute(permute(xi + 1) + yi) + zi);
+    int bba = permute(permute(permute(xi + 1) + yi + 1) + zi);
+    int bab = permute(permute(permute(xi + 1) + yi) + zi + 1);
+    int bbb = permute(permute(permute(xi + 1) + yi + 1) + zi + 1);
+
+    float x1, x2, y1, y2;
+    x1 = lerp(grad(aaa, Pf), grad(baa, Pf - vec3(1,0,0)), f.x);
+    x2 = lerp(grad(aba, Pf - vec3(0,1,0)), grad(bba, Pf - vec3(1,1,0)), f.x);
+    y1 = lerp(x1, x2, f.y);
+
+    x1 = lerp(grad(aab, Pf - vec3(0,0,1)), grad(bab, Pf - vec3(1,0,1)), f.x);
+    x2 = lerp(grad(abb, Pf - vec3(0,1,1)), grad(bbb, Pf - vec3(1,1,1)), f.x);
+    y2 = lerp(x1, x2, f.y);
+
+    return 0.5 + 0.5 * lerp(y1, y2, f.z); // 归一化到0~1
+}
+
+float fog_density(vec3 pos) {
+    float T = 0.7;
+    float density = 0;
+    float r = length(pos);
+    float omega = 4/r/sqrt(r-2*0.2);
+    float r0 = 0.62;
+    if (r < r0) return 0;
+    int N = 3;
+    for (int i = 0; i < N; ++i){
+        float time_eff = time + i * T / N - float(int((time + i * T / N)/T) * T) ;
+        float phi_0 = 0.0;
+        time_eff +=phi_0;
+        float c = cos(time_eff * omega );
+        float s = sin(time_eff * omega );
+        vec3 pos1 =
+        mat3(
+            c, -s, 0.0,
+            s,  c, 0.0,
+            0.0, 0.0, 1.0
+        ) * pos;
+        float n1 = perlin(pos1 * 18.5); // 0.05控制雾的块感
+        float n2 = perlin(pos1*pow(r,0.5) * 2.5);
+        time_eff -= phi_0;
+        density += (0.2 * n2 + 0.65 * n1*n2 ) * pow(sin(time_eff/T * 3.1415),2);
+    }
+    float base = exp(-r*r*0.6 - pos.z * pos.z * 655) * pow(r-r0,1.6);
+    density = density * base;
+    return density;
+}
+
+float dopplerI(vec3 pos, vec3 vc){
+    float r = length(pos);
+    float M = 0.2;
+    if (r < 3 * M)return 0;
+    vc += (1/sqrt(1-2 * M / r) - 1) * dot(pos, vc)/max(dot(pos,pos),1e-6) * pos;
+    vec3 vp = cross(vec3(0,0,1),pos);
+    float cos_theta = dot(vc,vp)/length(vc)/length(vp);
+    float gammap2 =  (r - 3 * M)/(r - 2 * M);
+    float beta = sqrt(M / (r - 2*M));
+    return gammap2*gammap2 / pow(1 + beta * cos_theta,4);
+}
+
+// 将黑体温度 (K) 转换为 RGB 颜色 (vec3, 范围 [0,1])
+vec3 radiation_color(float T){
+    // 约束温度范围 (避免极端值导致计算错误)
+    T = clamp(T, 1000.0, 40000.0);
+
+    // 归一化温度
+    float temp = T / 100.0;
+
+    // 计算红色通道
+    float r;
+    if (temp <= 66.0) {
+        r = 1.0;
+    } else {
+        r = temp - 60.0;
+        r = 329.698727446 * pow(r, -0.1332047592);
+        r = clamp(r / 255.0, 0.0, 1.0);
+    }
+
+    // 计算绿色通道
+    float g;
+    if (temp <= 66.0) {
+        g = temp;
+        g = 99.4708025861 * log(g) - 161.1195681661;
+    } else {
+        g = temp - 60.0;
+        g = 288.1221695283 * pow(g, -0.0755148492);
+    }
+    g = clamp(g / 255.0, 0.0, 1.0);
+
+    // 计算蓝色通道
+    float b;
+    if (temp >= 66.0) {
+        b = 1.0;
+    } else {
+        if (temp <= 19.0) {
+            b = 0.0;
+        } else {
+            b = temp - 10.0;
+            b = 138.5177312231 * log(b) - 305.0447927307;
+            b = clamp(b / 255.0, 0.0, 1.0);
+        }
+    }
+    return vec3(r, g, b);
+}
+
+float dopplerT(vec3 pos, vec3 vc){
+    float r = length(pos);
+    float M = 0.2;
+    if (r < 3*M)return 0;
+    vc += (1/sqrt(1-2 * M / r) - 1) * dot(pos, vc)/dot(pos,pos) * pos;
+    vec3 vp = cross(vec3(0,0,1),pos);
+    float cos_theta = dot(vc,vp)/length(vc)/length(vp);
+    float gammap =  sqrt((r - 3 * M)/(r - 2 * M));
+    float beta = sqrt(M / (r - 2*M));
+    return  gammap/ (1 + beta * cos_theta);
+}
+
+void main() {
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+
+    vec3 power = vec3(0,0,0);
+    float S = 1.0;
+    for (int i = 0; i < pathStride - 1; ++i) {
+        vec4 p = texelFetch(paths, ivec3(pixel, i), 0);
+        vec3 vc = texelFetch(paths, ivec3(pixel, i + 1), 0).xyz - p.xyz;
+        if (p.w <= 0.0) break; // w为路径长度，<=0表示无效
+        // 沿路径采样
+        vec3 r_color;
+        float tem_eff ;
+        if (if_dopplerT == 1){
+            tem_eff = temperature/pow(length(p.xyz),1.2)* dopplerT(p.xyz, vc) ;
+        }else{
+            tem_eff = temperature/pow(length(p.xyz),1.2) ;
+        }
+        float density = fog_density(p.xyz);
+        r_color = radiation_color(tem_eff*(1.0 + density * 1e1) )/255.0 ;
+        r_color.x = pow(r_color.x,2.2);
+        r_color.y = pow(r_color.y,2.2);
+        r_color.z = pow(r_color.z,2.2);
+
+        if (if_dopplerI == 1){
+            power += density * p.w * S *dopplerI(p.xyz, vc) * r_color;
+        }else{
+            power += density * p.w * S * r_color;
+        }
+        S *= 1+(- 5.2 * density * p.w * length(p.xyz));
+        if (S < 0.01){
+            break;
+        }
+    }
+    for (int c = 0; c < 3; ++c) {
+        if (isnan(power[c]) || isinf(power[c])) {
+            power[c] = 0.0;
+        }
+    }
+    power *= L;
+    for (int i = 0; i < 3; ++i){
+        if (power[i] > 1)power[i] = 1;
+        if (power[i] < 0)power[i] = 0;
+        power[i] = pow(power[i],1/2.2);
+    }
+    FragColor = vec4(power, 1.0);
+}

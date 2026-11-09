@@ -1,6 +1,7 @@
 #include "Schwarzschild_march.h"
 #include "geodesic.h"
 #include <iostream>
+#include <cmath>
 
 
 Schwarzschild_BH_RayMarch::Schwarzschild_BH_RayMarch(){

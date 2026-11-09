@@ -4,6 +4,8 @@
 #include "OpenGLVolumeRender.h"
 #include "gauge_march.h"
 #include "bloom.h"
+#include "shader_path.h"
+#include "imgui_font.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
@@ -50,12 +52,14 @@ int main() {
     svVector light0 = RM0->compute_light(0.05,stop);
     std::vector<std::vector<Eigen::Vector4f>> lights(width * height);
     OpenGLRenderer renderer(width, height, "OpenGL Renderer");
-    renderer.initShaders_Bloom(SHADERS_DIR);
+    const std::string shader_dir = find_shader_dir();
+    renderer.initShaders_Bloom(shader_dir.c_str());
     VolumeComputeShader shader(width, height, PATH_N);//32采样
-    shader.init(SHADERS_DIR "/volume_compute.comp");
+    shader.init(shader_dir.c_str());
     
     //ImGui Init
     ImGui::CreateContext();
+    load_imgui_cjk_font(20.0f);
     ImGui_ImplGlfw_InitForOpenGL(renderer.getWindow(), true);
     ImGui_ImplOpenGL3_Init("#version 330");
     //*
@@ -128,13 +132,13 @@ int main() {
     start = std::chrono::high_resolution_clock::now();
     std::vector<float> Power(width * height);
 
-    // 2. �ϴ�·������
+    // 2. 上传路径数据
     shader.uploadPaths(lights);
 
     end = std::chrono::high_resolution_clock::now();
     elapsed = end - start;
-    std::cout << "  -Upload Done " << elapsed.count() << "ms" <<std::endl;
-    // 3. ��������
+    std::cout << "  -Upload Done " << elapsed.count() << "ms" << std::endl;
+    // 3. 渲染循环
 
     float time = 0;
     int time_int = 0;
@@ -142,26 +146,26 @@ int main() {
     while (!renderer.shouldClose()) {
         
         shader.dispatch();
-        
+
         shader.time_ = time;
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        ImGui::Begin("Control");
+        ImGui::Begin("控制面板", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
         static float strength = 0.2f, LM = 6.f;
-        if (ImGui::SliderFloat("Bloom Strength", &strength, 0.0f, 2.0f))
+        if (ImGui::SliderFloat("泛光强度", &strength, 0.0f, 2.0f))
             renderer.setBloomStrength(strength);
         static float T = 5000.f;
-        if (ImGui::SliderFloat("Tempetarue", &T, 500.0f, 20000.0f))
+        if (ImGui::SliderFloat("温度 (K)", &T, 500.0f, 20000.0f))
             shader.T_ = T;
         static int if_dopplerI = true, if_dopplerT = true, bloom_N = 8;
-        if (ImGui::SliderInt("Doppler I", &if_dopplerI, 0, 1))
+        if (ImGui::SliderInt("多普勒亮度", &if_dopplerI, 0, 1))
             shader.if_dopplerI_ = if_dopplerI;
-        if (ImGui::SliderInt("Doppler T", &if_dopplerT, 0, 1))
+        if (ImGui::SliderInt("多普勒温度", &if_dopplerT, 0, 1))
             shader.if_dopplerT_ = if_dopplerT;
-        if (ImGui::SliderInt("Bloom_N", &bloom_N, 1, 20))
+        if (ImGui::SliderInt("泛光迭代数", &bloom_N, 1, 20))
             renderer.bloom_N = bloom_N * 2;
-        if (ImGui::SliderFloat("log Luminance", &LM, 1, 20))
+        if (ImGui::SliderFloat("对数亮度", &LM, 1, 20))
             shader.L_ = pow(10.f,LM);
         ImGui::End();
         ImGui::Render();

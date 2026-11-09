@@ -1,5 +1,6 @@
 #include "geodesic.h"
 #include <iostream>
+#include <cmath>
 
 typedef std::shared_ptr<std::vector<double>> sv;
 Geodesic::Geodesic(double M){

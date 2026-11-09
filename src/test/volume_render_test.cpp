@@ -1,14 +1,12 @@
 #include "OpenGLRenderer.h"
 #include "ray_march.h"
 #include "volume_render.h"
+#include "sf_hydrogen.h"
 #include <Eigen>
 #include <vector>
 #include <memory>
 #include <cmath>
 #include <iostream>
-#include <gsl/gsl_sf_laguerre.h>
-#include <gsl/gsl_sf_legendre.h>
-#include <gsl/gsl_sf_gamma.h>
 
 #define X_SIGHT 2.0
 #define Y_SIGHT 1.5
@@ -27,17 +25,17 @@ double hydrogen_wave(int n, int l, int m, double x, double y, double z) {
 
     // 2. 归一化常数
     double norm = std::sqrt(
-        std::pow(2.0/(double)n, 3) * gsl_sf_gamma(n-l) /
-        (2.0*n * gsl_sf_gamma(n+l+1))
+        std::pow(2.0/(double)n, 3) * sf_gamma_int(n-l) /
+        (2.0*n * sf_gamma_int(n+l+1))
     );
 
     // 3. 径向部分
     double rho = 2.0 * r / n;
     double radial = std::exp(-rho/2) * std::pow(rho, l) *
-        gsl_sf_laguerre_n(n-l-1, 2*l+1, rho);
+        sf_laguerre_n(n-l-1, 2*l+1, rho);
 
     // 4. 角向部分（球谐函数模长，忽略e^{im\phi}的相位）
-    double sph = gsl_sf_legendre_sphPlm(l, std::abs(m), std::cos(theta));
+    double sph = sf_legendre_sphPlm(l, std::abs(m), std::cos(theta));
     if (m < 0) sph *= (m % 2 == 0 ? 1 : -1); // Condon-Shortley phase
 
     // 5. 总波函数（不含e^{im\phi}相位）
