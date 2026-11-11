@@ -136,14 +136,12 @@ main = "src/test/volume_render_test.cpp"
 kind = "bin"
 main = "src/test/imgui_test.cpp"
 
-# openkal 式目标(x86_64-windows 等)的 system side 来自依赖图,不由宿主 payload
-# 提供 —— 社区(sunrisep eak)给出的配方。**必须挂在 feature-deps 下**:
-# 若写进无条件 [dependencies],它把 macOS 目标的 c++-abi 也换成依赖图的
-# libc++,级联拉进 openkal-musl,Apple SDK 头文件(TargetConditionals.h 等)全部
-# 消失,macOS 构建直接报废。用法:
-#   mcpp build --target x86_64-windows --features openkal-cross
-[features]
-openkal-cross = {}
-
-[feature-deps.openkal-cross]
-openkal-llvm-runtime = "0.19.2"
+# 交叉到 Windows 不需要任何额外 feature：mcpp 2026.11.10.1 起任一宿主都能直接
+# build --target x86_64-windows-gnu，Win32 头文件和导入库由索引里的
+# xim:mingw-w64-sysroot 提供（纯数据包，c-abi = ucrt）。
+#
+# 这里曾挂过 [features] openkal-cross + [feature-deps.openkal-cross]
+# (openkal-llvm-runtime)，那是 2026.11.10.1 之前的临时配方：走 openkal 的 musl
+# CRT 出 PE，且必须挂在 feature-deps 下——写进无条件 [dependencies] 会把 macOS
+# 目标的 c++-abi 也换成依赖图的 libc++，级联拉进 openkal-musl，Apple SDK 头文件
+# 全部消失。上游修好之后这段已无用途，删除。

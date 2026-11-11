@@ -25,6 +25,29 @@ mcpp run imgui-test                 # ImGui 冒烟测试
 mcpp run io-test                    # 输入输出
 ```
 
+### 交叉编译到 Windows
+
+从 macOS 或 Linux 直接产出 Windows PE,无需 Windows 机器、无需 MinGW 交叉编译器:
+
+```bash
+mcpp build --target x86_64-windows-gnu    # → target/x86_64-windows-gnu/<hash>/bin/*.exe
+mcpp build --target aarch64-windows-gnu   # Windows on ARM
+```
+
+macOS 宿主用 `xim:llvm` 作编译器、`xim:mingw-w64-sysroot` 作 sysroot(Win32 头文件 +
+`lib*.a` 导入库 + UCRT,纯数据包),首次构建会从索引拉取约 21 MB。产物是真 Win32 程序:
+
+```
+file swz-bh-realtime.exe
+  PE32+ executable (console) x86-64, for MS Windows
+```
+
+依赖 `KERNEL32` / `USER32` / `GDI32` / `SHELL32` / `dwmapi`。这需要 **mcpp ≥ 2026.11.10.1**
+(此前 macOS 宿主缺 Win32 系统侧,见 issue [#913](https://github.com/mcpp-community/mcpp/issues/913))。
+
+程序运行时会向上回溯查找 `src/shaders`(最多 6 级)。单独拷 exe 到别的机器时,记得把
+`src/shaders` 一并带过去,或者放在 exe 同级目录的 `src/shaders` 下。
+
 ### 目标说明
 
 核心内容:
